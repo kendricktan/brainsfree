@@ -1,4 +1,4 @@
-{ mkDerivation, Cabal, cabal-install, stdenv, base, free
+{ mkDerivation, Cabal, cabal-install, stdenv, base, containers, mtl, free
 } : mkDerivation {
   pname = "brainsfree";
   version = "0.0.1";
@@ -8,7 +8,7 @@
   ];
   setupHaskellDepends = [ base Cabal ];
   libraryHaskellDepends = [
-    base free
+    base containers mtl free
   ];
   testHaskellDepends = [
     base
