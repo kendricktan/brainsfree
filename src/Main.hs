@@ -58,17 +58,25 @@ tokenize ']' = loopEnd
 tokenize _   = continue
 
 interpretJmp :: Brainfree next -> BrainfuckIO (Brainfree next)
-interpretJmp x = undefined
+interpretJmp (Free (IncrementPointer next)) = interpretJmp next
+interpretJmp (Free (DecrementPointer next)) = interpretJmp next
+interpretJmp (Free (IncrementValue next))   = interpretJmp next
+interpretJmp (Free (DecrementValue next))   = interpretJmp next
+interpretJmp (Free (InputChar next))        = interpretJmp next
+interpretJmp (Free (OutputChar next))       = interpretJmp next
+interpretJmp (Free (LoopStart next))        = interpretJmp next
+interpretJmp (Free (LoopEnd next))          = interpretJmp next
+interpretJmp (Free (Continue next))          = interpretJmp next
 
--- Returns start of the loop
+-- Returns end of the loop
 -- Once it completes
 interpretLoop :: Brainfree next -> BrainfuckIO (Brainfree next)
 interpretLoop x = do
   -- Stop once it reaches end of loop
-  interpret x
-  return x
+  end <- interpret x
+  return end
 
-interpret :: Brainfree next -> BrainfuckIO ()
+interpret :: Brainfree next -> BrainfuckIO (Brainfree next)
 interpret (Free (IncrementPointer next)) = do
   v <- gets pointerLocation
   modify (\s -> s { pointerLocation = v + 1 } )
@@ -104,12 +112,33 @@ interpret (Free (InputChar next)) = do
   modify (\s -> s { tapeValues =  insert l (ord c) m })
   interpret next
 interpret (Free (Continue next)) = interpret next
-interpret (Free (LoopStart next)) = undefined
-interpret (Free (LoopEnd next)) = undefined
+interpret loopStart@(Free (LoopStart next)) = do
+  ln <- gets nestedLoopNo
+  modify (\s -> s { nestedLoopNo = ln + 1 } )
+  -- Execute till loop ends
+  loopEnd <- interpretLoop next
+  -- Read current pointer position
+  l' <- gets pointerLocation
+  m' <- gets tapeValues
+  let v' = findWithDefault 0 l' m'
+  -- If byte at data pointer is nonzero,
+  -- jump back to start
+  case v' /= 0 of
+    True  -> interpret loopStart
+    False -> interpret loopEnd
+interpret (Free (LoopEnd next)) = do
+  ln <- gets nestedLoopNo
+  let ln' = ln - 1
+  case ln' < 0 of
+    -- Incorrect number of brackets
+    True -> interpret $ throw MissingOpeningBracket
+    False -> do
+      modify (\s -> s { nestedLoopNo = ln' })
+      return next
 interpret (Free Terminate) = do
   ln <- gets nestedLoopNo
   case ln == 0 of
-    True -> return ()
+    True  -> return terminate
     False -> interpret $ throw MissingClosingBracket
 interpret (Free (Throw err)) = error $ show err
 
