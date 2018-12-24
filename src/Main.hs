@@ -58,6 +58,8 @@ tokenize '[' = loopStart
 tokenize ']' = loopEnd
 tokenize _   = continue
 
+-- Inteprets '[' if byte at data pointer is 0
+--
 interpretJmp :: Brainfree next -> BrainfuckIO (Brainfree next)
 interpretJmp (Free (IncrementPointer next)) = interpretJmp next
 interpretJmp (Free (DecrementPointer next)) = interpretJmp next
@@ -74,11 +76,13 @@ interpretJmp (Free (LoopEnd next))          = do
   let ln' = ln - 1
   modify (\s -> s { nestedLoopJmp = ln' })
   case ln' of
-    0 -> return next
+    0 -> do
+      return next
     _ -> interpretJmp next
 interpretJmp (Free (Continue next))         = interpretJmp next
 interpretJmp (Free Terminate)               = interpret $ throw MissingClosingBracket
 
+-- Inteprets '[' if byte at data pointer is non-zero
 -- Returns end of the loop
 -- Once it completes
 interpretLoop :: Brainfree next -> BrainfuckIO (Brainfree next)
@@ -117,7 +121,8 @@ interpret (Free (OutputChar next)) = do
   liftIO $ putChar (chr v)
   interpret next
 interpret (Free (InputChar next)) = do
-  c <- liftIO getChar
+  liftIO $ putStrLn "Enter a character: "
+  (c: _) <- liftIO getLine
   l <- gets pointerLocation
   m <- gets tapeValues
   modify (\s -> s { tapeValues =  insert l (ord c) m })
@@ -130,7 +135,7 @@ interpret loopStart@(Free (LoopStart next)) = do
   let v = findWithDefault 0 l m
   case v == 0 of
     True -> do
-      loopEnd <- interpretJmp next
+      loopEnd <- interpretJmp loopStart
       interpret loopEnd
     False -> do
       modify (\s -> s { nestedLoopNo = ln + 1 } )
