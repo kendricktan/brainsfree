@@ -21,6 +21,7 @@ data Brainstate = Brainstate
   { tapeValues      :: Map Int Int
   , pointerLocation :: Int
   , nestedLoopNo    :: Int
+  , nestedLoopJmp   :: Int
   }
 
 data Brainfuck state err next = IncrementPointer next
@@ -64,9 +65,19 @@ interpretJmp (Free (IncrementValue next))   = interpretJmp next
 interpretJmp (Free (DecrementValue next))   = interpretJmp next
 interpretJmp (Free (InputChar next))        = interpretJmp next
 interpretJmp (Free (OutputChar next))       = interpretJmp next
-interpretJmp (Free (LoopStart next))        = interpretJmp next
-interpretJmp (Free (LoopEnd next))          = interpretJmp next
-interpretJmp (Free (Continue next))          = interpretJmp next
+interpretJmp (Free (LoopStart next))        = do
+  ln <- gets nestedLoopJmp
+  modify (\s -> s { nestedLoopJmp = ln + 1 })
+  interpretJmp next
+interpretJmp (Free (LoopEnd next))          = do
+  ln <- gets nestedLoopJmp
+  let ln' = ln - 1
+  modify (\s -> s { nestedLoopJmp = ln' })
+  case ln' of
+    0 -> return next
+    _ -> interpretJmp next
+interpretJmp (Free (Continue next))         = interpretJmp next
+interpretJmp (Free Terminate)               = interpret $ throw MissingClosingBracket
 
 -- Returns end of the loop
 -- Once it completes
@@ -114,18 +125,26 @@ interpret (Free (InputChar next)) = do
 interpret (Free (Continue next)) = interpret next
 interpret loopStart@(Free (LoopStart next)) = do
   ln <- gets nestedLoopNo
-  modify (\s -> s { nestedLoopNo = ln + 1 } )
-  -- Execute till loop ends
-  loopEnd <- interpretLoop next
-  -- Read current pointer position
-  l' <- gets pointerLocation
-  m' <- gets tapeValues
-  let v' = findWithDefault 0 l' m'
-  -- If byte at data pointer is nonzero,
-  -- jump back to start
-  case v' /= 0 of
-    True  -> interpret loopStart
-    False -> interpret loopEnd
+  l <- gets pointerLocation
+  m <- gets tapeValues
+  let v = findWithDefault 0 l m
+  case v == 0 of
+    True -> do
+      loopEnd <- interpretJmp next
+      interpret loopEnd
+    False -> do
+      modify (\s -> s { nestedLoopNo = ln + 1 } )
+      -- Execute till loop ends
+      loopEnd <- interpretLoop next
+      -- Read current pointer position
+      l' <- gets pointerLocation
+      m' <- gets tapeValues
+      let v' = findWithDefault 0 l' m'
+      -- If byte at data pointer is nonzero,
+      -- jump back to start
+      case v' /= 0 of
+        True  -> interpret loopStart
+        False -> interpret loopEnd
 interpret (Free (LoopEnd next)) = do
   ln <- gets nestedLoopNo
   let ln' = ln - 1
@@ -144,7 +163,7 @@ interpret (Free (Throw err)) = error $ show err
 
 
 initialState :: Brainstate
-initialState = Brainstate empty 0 0
+initialState = Brainstate empty 0 0 0
 
 main :: IO ()
 main = do
